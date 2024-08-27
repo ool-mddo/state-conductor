@@ -1,0 +1,26 @@
+[tool.poetry]
+name = "state-conductor"
+version = "0.1.0"
+description = ""
+authors = ["Shota Muto <129914139+MutoShota@users.noreply.github.com>"]
+license = "MIT"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+flask = "^3.0.3"
+requests = "^2.32.3"
+
+[tool.poetry.group.dev.dependencies]
+ipython = "^8.26.0"
+black = "^24.8.0"
+pylint = "^3.2.6"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[[tool.poetry.source]]
+name = "files"
+url = "https://files.pythonhosted.org/"
+priority = "supplemental"
