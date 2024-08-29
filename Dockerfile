@@ -5,6 +5,6 @@ WORKDIR /state-conductor
 COPY . /state-conductor/
 
 RUN pip install --no-cache-dir poetry
-RUN poetry install --no-dev --no-cache
-ENV PYTHONPATH=/bgp-policy-parser/src
+RUN poetry install --no-dev --no-cache --no-root
+ENV PYTHONPATH=/state-conductor/src
 ENTRYPOINT ["poetry", "run", "python3", "src/app.py"]
