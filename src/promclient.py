@@ -11,15 +11,14 @@ class PrometheusClient:
     def __init__(self, base_url: str):
         self.base_url = base_url.rstrip('/')
     
-    def query_metrics(self, query: str, start: str, end: str, step: str) -> list:
-        url = f"{self.base_url}/api/v1/query_range"
+    def query_instant_metrics(self, query: str, timestamp: int) -> list:
+        url = f"{self.base_url}/api/v1/query"
         params = {
             "query": query,
-            "start": start,
-            "end": end,
-            "step": step
+            "time": timestamp,
         }
-        response = requests.get(url, params=params)
+        logger.info(f"querying: {query}")
+        response = requests.get(url=url, params=params)
         
         if response.status_code != 200:
             logger.error("Failed to query metrics.")
