@@ -37,7 +37,7 @@ def get_timestamp(network: str, snapshot: str, action: str) -> str:
 @app.route("/state-conductor/environment/<network>/<snapshot>/sampling", methods=["POST"])
 def post_sampling_action(network: str, snapshot: str):
     if not request.is_json:
-        return jsonify({"error": "request is not json"}), 500
+        return jsonify({"error": "request is not json"}), 400
 
     action = request.json["action"]
     app_logger.info(f"Sampling action=#{action}, for environment {network}/{snapshot}")
@@ -45,7 +45,7 @@ def post_sampling_action(network: str, snapshot: str):
     if not action in ["begin", "end"]:
         msg = f"action `{action}` is not defined"
         app_logger.warn(msg)
-        return { "error", msg }
+        return jsonify({ "error": msg }), 400
 
     save_timestamp(network, snapshot, action)
 
