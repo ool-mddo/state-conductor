@@ -65,12 +65,12 @@ def get_sampled_state_stats(network: str, snapshot: str):
     duration = end - begin
 
     queries = {
-        "RX_BPS_AVG": f'avg_over_time(irate(container_network_receive_bytes_total{{instance="namespace-relabeler:5000",name=~"clab-.*"}}[15s])[{duration}s:])*8',
-        "RX_BPS_MAX": f'max_over_time(irate(container_network_receive_bytes_total{{instance="namespace-relabeler:5000",name=~"clab-.*"}}[15s])[{duration}s:])*8',
-        "RX_BPS_MIN": f'min_over_time(irate(container_network_receive_bytes_total{{instance="namespace-relabeler:5000",name=~"clab-.*"}}[15s])[{duration}s:])*8',
-        "TX_BPS_AVG": f'avg_over_time(irate(container_network_transmit_bytes_total{{instance="namespace-relabeler:5000",name=~"clab-.*"}}[15s])[{duration}s:])*8',
-        "TX_BPS_MAX": f'max_over_time(irate(container_network_transmit_bytes_total{{instance="namespace-relabeler:5000",name=~"clab-.*"}}[15s])[{duration}s:])*8',
-        "TX_BPS_MIN": f'min_over_time(irate(container_network_transmit_bytes_total{{instance="namespace-relabeler:5000",name=~"clab-.*"}}[15s])[{duration}s:])*8',
+        "RX_BPS_AVG": f'avg_over_time(irate(container_network_receive_bytes_total{{instance="namespace-relabeler:5000",name=~"clab-.*"}}[10s])[{duration}s:])*8',
+        "RX_BPS_MAX": f'max_over_time(irate(container_network_receive_bytes_total{{instance="namespace-relabeler:5000",name=~"clab-.*"}}[10s])[{duration}s:])*8',
+        "RX_BPS_MIN": f'min_over_time(irate(container_network_receive_bytes_total{{instance="namespace-relabeler:5000",name=~"clab-.*"}}[10s])[{duration}s:])*8',
+        "TX_BPS_AVG": f'avg_over_time(irate(container_network_transmit_bytes_total{{instance="namespace-relabeler:5000",name=~"clab-.*"}}[10s])[{duration}s:])*8',
+        "TX_BPS_MAX": f'max_over_time(irate(container_network_transmit_bytes_total{{instance="namespace-relabeler:5000",name=~"clab-.*"}}[10s])[{duration}s:])*8',
+        "TX_BPS_MIN": f'min_over_time(irate(container_network_transmit_bytes_total{{instance="namespace-relabeler:5000",name=~"clab-.*"}}[10s])[{duration}s:])*8',
     }
 
     required_keys_map = {
