@@ -1,4 +1,5 @@
 import logging
+from os import getenv
 from flask import Flask, jsonify, request
 from flask.logging import create_logger
 from datetime import datetime, timezone
@@ -6,6 +7,7 @@ from pathlib import Path
 from math import floor
 from promclient import PrometheusClient
 from collections import defaultdict
+from typing import Dict
 import re
 
 app = Flask(__name__)
@@ -15,53 +17,93 @@ logging.basicConfig(level=logging.DEBUG)
 
 DATA_DIR = Path(__file__).parent
 TIMESTAMP_DIR = DATA_DIR.joinpath("timestamp")
-PROMETHEUS_URL = "http://prometheus:9090"
+PROMETHEUS_URL = getenv("PROMETHEUS_URL", "http://prometheus:9090")
 
-step_seconds=10
-def get_timestamp_filepath(network: str, snapshot: str, action: str) -> Path:
+
+def _get_timestamp_filepath(network: str, snapshot: str, action: str) -> Path:
     return TIMESTAMP_DIR.joinpath(f"{network}-{snapshot}-{action}.txt")
 
-def save_timestamp(network: str, snapshot: str, action: str) -> None:
-    path = get_timestamp_filepath(network, snapshot, action)
+
+def _exist_timestamp_file(network: str, snapshot: str, action: str) -> bool:
+    path = _get_timestamp_filepath(network, snapshot, action)
+    return path.exists()
+
+
+def _exist_ongoing_sampling(network: str, snapshot: str) -> bool:
+    if not _exist_timestamp_file(network, snapshot, "begin"):
+        return False
+
+    if _exist_timestamp_file(network, snapshot, "end"):
+        begin = _get_timestamp(network, snapshot, "begin")
+        end = _get_timestamp(network, snapshot, "end")
+        if begin > end:
+            return True
+    else:
+        return True
+
+    return False
+
+
+def _save_timestamp(network: str, snapshot: str, action: str) -> None:
+    path = _get_timestamp_filepath(network, snapshot, action)
     if not path.parent.exists():
         path.parent.mkdir(exist_ok=True)
-    with open(path, 'w') as f:
+    with open(path, "w") as f:
+        # save unix timestamp (epoch)
         f.write(str(floor(datetime.now(timezone.utc).timestamp())))
 
-def get_timestamp(network: str, snapshot: str, action: str) -> int:
-    path = get_timestamp_filepath(network, snapshot, action)
-    with open(path, 'r') as f:
+
+def _get_timestamp(network: str, snapshot: str, action: str) -> int:
+    path = _get_timestamp_filepath(network, snapshot, action)
+    with open(path, "r") as f:
         timestamp = f.read()
     return int(floor(float(timestamp)))
 
-@app.route("/state-conductor/environment/<network>/<snapshot>/sampling", methods=["POST"])
+
+def _error_message(response: Dict, msg: str) -> Dict:
+    app_logger.error(msg)
+    response["error"] = msg
+    return response
+
+
+@app.route(
+    "/state-conductor/environment/<network>/<snapshot>/sampling", methods=["POST"]
+)
 def post_sampling_action(network: str, snapshot: str):
+    response = {"network": network, "snapshot": snapshot}
+
     if not request.is_json:
-        return jsonify({"error": "request is not json"}), 400
+        response["error"] = "request is not json"
+        return jsonify(response), 400
 
     action = request.json["action"]
     app_logger.info(f"Sampling action=#{action}, for environment {network}/{snapshot}")
 
+    # error check
     if not action in ["begin", "end"]:
         msg = f"action `{action}` is not defined"
-        app_logger.warn(msg)
-        return jsonify({ "error": msg }), 400
+        return jsonify(_error_message(response, msg)), 400
+    if action == "begin" and _exist_ongoing_sampling(network, snapshot):
+        msg = "sampling has already began. post action=end to complete the running sampling before begin."
+        return jsonify(_error_message(response, msg)), 400
+    if action == "end" and not _exist_ongoing_sampling(network, snapshot):
+        msg = "sampling does not begin. begin at first to post action=begin"
+        return jsonify(_error_message(response, msg)), 404
 
-    save_timestamp(network, snapshot, action)
+    # move into action
+    _save_timestamp(network, snapshot, action)
 
-    response = {
-        "network": network,
-        "snapshot": snapshot,
-        "action": action,
-    }
     # response
+    response["action"] = action
+    response["timestamp"] = _get_timestamp(network, snapshot, action)
     return jsonify(response)
+
 
 @app.route("/state-conductor/environment/<network>/<snapshot>/state", methods=["GET"])
 def get_sampled_state_stats(network: str, snapshot: str):
 
-    begin = get_timestamp(network, snapshot, 'begin')
-    end   = get_timestamp(network, snapshot, 'end')
+    begin = _get_timestamp(network, snapshot, "begin")
+    end = _get_timestamp(network, snapshot, "end")
     duration = end - begin
 
     queries = {
@@ -106,7 +148,7 @@ def get_sampled_state_stats(network: str, snapshot: str):
             if not device:
                 app_logger.debug(f"device is not found. skipping")
                 continue
-            value = raw_metric["value"][1] # 1個目がタイムスタンプ、2個目が値
+            value = raw_metric["value"][1]  # 1個目がタイムスタンプ、2個目が値
             metrics[device][interface][metric_type] = value
 
     state_data = {
@@ -117,6 +159,7 @@ def get_sampled_state_stats(network: str, snapshot: str):
 
     # response
     return jsonify(state_data)
+
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=5000)
