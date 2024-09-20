@@ -18,7 +18,7 @@ class PrometheusClient:
             "query": query,
             "time": timestamp,
         }
-        logger.info(f"querying: {query}")
+        logger.debug(f"querying: {query}")
         response = requests.get(url=url, params=params)
 
         if response.status_code != 200:
