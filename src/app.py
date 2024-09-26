@@ -167,19 +167,31 @@ def get_state_stats_diff(network: str, source_snapshot: str, destination_snapsho
 
     diff = dict() 
 
+    target_device = request.args.get("device")
+    target_interface = request.args.get("interface")
+
+    app_logger.info(f"target_device: {target_device}, target_interface: {target_interface}")
+
     for dest_device, dest_if_stats in destination_stats.items():
+        if target_device and dest_device != target_device:
+            app_logger.debug(f"device `{dest_device}` is not target. skipped")
+            continue
 
         if dest_device not in source_stats:
             app_logger.info(f"state stats for device `{dest_device}` is not found in source_snapshot ({network}/{source_snapshot}). skipped")
             continue
 
-        if dest_device not in diff:
-            diff[dest_device] = dict()
-
         for dest_interface, dest_stats in dest_if_stats.items():
+            if target_interface and dest_interface != target_interface:
+                app_logger.debug(f"interface `{dest_interface}` is not target. skipped")
+                continue
+
             if dest_interface not in source_stats[dest_device]:
                 app_logger.info(f"state stats for interface `{dest_interface}` is not found in destination_snapshot ({network}/{destination_snapshot}). skipped")
                 continue
+
+            if dest_device not in diff:
+                diff[dest_device] = dict()
 
             diff[dest_device][dest_interface] = dict()
 
@@ -199,6 +211,10 @@ def get_state_stats_diff(network: str, source_snapshot: str, destination_snapsho
                     diff[dest_device][dest_interface][metric_name]["ratio"] = None
                 else:
                     diff[dest_device][dest_interface][metric_name]["ratio"] = dest_state_value / src_state_value
+
+    if diff == {}:
+        app_logger.info(f"no snapshot diff generated between {network}/{source_snapshot} and {network}/{destination_snapshot}")
+
     result = {
         "network": network,
         "source_snapshot": source_snapshot,
