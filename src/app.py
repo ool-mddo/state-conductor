@@ -154,55 +154,59 @@ def get_sampled_state_stats(network: str, snapshot: str):
 
     return jsonify(response)
 
-@app.route("/state-conductor/environment/<network>/<snapshot>/diff", methods=["GET"])
-def get_state_stats_diff(network: str, snapshot: str):
-    original_asis_state = _get_original_asis_state(network)
-    sampled_stats = _load_state_stats(network, snapshot)
+@app.route("/state-conductor/<network>/snapshot_diff/<source_snapshot>/<destination_snapshot>", methods=["GET"])
+def get_state_stats_diff(network: str, source_snapshot: str, destination_snapshot: str):
+    source_stats = _load_state_stats(network, source_snapshot)
+    destination_stats = _load_state_stats(network, destination_snapshot)
 
-    if not original_asis_state:
-        return jsonify({"error": f"original as-is state for {network} is not found"}), 404
+    if not source_stats:
+        return jsonify({"error": f"state stats for source_snapshot ({network}/{source_snapshot}) is not found"}), 404
 
-    if not sampled_stats:
-        return jsonify({"error": f"sampled state for {network}/{snapshot} is not found"}), 404
+    if not destination_stats:
+        return jsonify({"error": f"state stats for destination_snapshot({network}/{destination_snapshot}) is not found"}), 404
 
     diff = dict() 
 
-    for device, if_stats in sampled_stats.items():
+    for dest_device, dest_if_stats in destination_stats.items():
 
-        if device not in original_asis_state:
-            app_logger.info(f"device {device} is not found in {network}/original_asis. skipped")
+        if dest_device not in source_stats:
+            app_logger.info(f"state stats for device `{dest_device}` is not found in source_snapshot ({network}/{source_snapshot}). skipped")
             continue
 
-        if device not in diff:
-            diff[device] = dict()
+        if dest_device not in diff:
+            diff[dest_device] = dict()
 
-        for interface, stats in if_stats.items():
-            if interface not in original_asis_state[device]:
-                app_logger.info(f"interface {interface} not found in {network}/original_asis. skipped")
+        for dest_interface, dest_stats in dest_if_stats.items():
+            if dest_interface not in source_stats[dest_device]:
+                app_logger.info(f"state stats for interface `{dest_interface}` is not found in destination_snapshot ({network}/{destination_snapshot}). skipped")
                 continue
 
-            diff[device][interface] = dict()
+            diff[dest_device][dest_interface] = dict()
 
-            for metric_name, value in stats.items():
-                diff[device][interface][metric_name] = dict()
-                original_asis_value = original_asis_state[device][interface].get(metric_name)
+            for metric_name, dest_state_value in dest_stats.items():
+                diff[dest_device][dest_interface][metric_name] = dict()
+                src_state_value = source_stats[dest_device][dest_interface].get(metric_name)
 
-                if original_asis_value == None:
-                    app_logger.info(f"metric {metric_name} not found in {network}/original_asis. skipped")
-                    diff[device][interface][metric_name] = None
+                if src_state_value == None:
+                    app_logger.info(f"metric {metric_name} not found in source_snapshot ({network}/{source_snapshot}). skipped")
+                    diff[dest_device][dest_interface][metric_name] = None
                     continue
 
-                app_logger.info(f"{value=}")
-                original_asis_value = original_asis_state[device][interface].get(metric_name)
-                diff[device][interface][metric_name]["counter"] = value - original_asis_value
+                diff[dest_device][dest_interface][metric_name]["counter"] = dest_state_value - src_state_value
 
-                if original_asis_value == 0.0:
-                    app_logger.info(f"{metric_name} of {network}/original_asis_value is 0. diff could not be calculated.")
-                    diff[device][interface][metric_name]["ratio"] = None
+                if src_state_value == 0.0:
+                    app_logger.info(f"{metric_name} in source_snapshot ({network}/{source_snapshot}) is 0. src/dst ration could not be calculated.")
+                    diff[dest_device][dest_interface][metric_name]["ratio"] = None
                 else:
-                    diff[device][interface][metric_name]["ratio"] = value / original_asis_value
+                    diff[dest_device][dest_interface][metric_name]["ratio"] = dest_state_value / src_state_value
+    result = {
+        "network": network,
+        "source_snapshot": source_snapshot,
+        "destination_snapshot": destination_snapshot,
+        "diff": diff,
+    }
 
-    return jsonify(diff), 200
+    return jsonify(result), 200
 
 def _fetch_sampled_state_stats(network: str, snapshot: str) -> dict:
 
