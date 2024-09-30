@@ -8,6 +8,7 @@ from math import floor
 from promclient import PrometheusClient
 from collections import defaultdict
 from typing import Dict
+import requests
 import re
 import json
 
@@ -20,6 +21,7 @@ DATA_DIR = Path(__file__).parent
 TIMESTAMP_DIR = DATA_DIR.joinpath("timestamp")
 STATE_DIR = DATA_DIR.joinpath("state")
 PROMETHEUS_URL = getenv("PROMETHEUS_URL", "http://prometheus:9090")
+API_PROXY_URL = "http://api-proxy"
 
 
 def _get_timestamp_filepath(network: str, snapshot: str, action: str) -> Path:
@@ -134,9 +136,20 @@ def post_sampling_action(network: str, snapshot: str):
     response["timestamp"] = _get_timestamp(network, snapshot, action)
     return jsonify(response)
 
+def _fetch_usecase_params(usecase: str, network: str) -> dict:
 
-def _get_original_asis_state(network: str) -> dict:
-    return _load_state_stats(network, "original_asis")
+    try:
+        response = requests.get(f"{API_PROXY_URL}/usecases/{usecase}/{network}/params")
+    except:
+        app_logger.error(f"failed to fetch usecase params.")
+        raise
+
+    if response.status_code != 200:
+        app_logger.error(f"failed to fetch usecase params. status_code={response.status_code}")
+    
+    app_logger.debug(f"response for usecase: {usecase}, network: {network}: {response.text}")
+    
+    return response.json()
 
 @app.route("/state-conductor/environment/<network>/<snapshot>/state", methods=["GET"])
 def get_sampled_state_stats(network: str, snapshot: str):
@@ -154,8 +167,8 @@ def get_sampled_state_stats(network: str, snapshot: str):
 
     return jsonify(response)
 
-@app.route("/state-conductor/<network>/snapshot_diff/<source_snapshot>/<destination_snapshot>", methods=["GET"])
-def get_state_stats_diff(network: str, source_snapshot: str, destination_snapshot: str):
+@app.route("/state-conductor/<usecase>/<network>/snapshot_diff/<source_snapshot>/<destination_snapshot>", methods=["GET"])
+def get_state_stats_diff(usecase: str, network: str, source_snapshot: str, destination_snapshot: str):
     source_stats = _load_state_stats(network, source_snapshot)
     destination_stats = _load_state_stats(network, destination_snapshot)
 
@@ -167,13 +180,21 @@ def get_state_stats_diff(network: str, source_snapshot: str, destination_snapsho
 
     diff = dict() 
 
-    target_device = request.args.get("device")
+    target_node = request.args.get("node")
     target_interface = request.args.get("interface")
 
-    app_logger.info(f"target_device: {target_device}, target_interface: {target_interface}")
+    usecase_params = _fetch_usecase_params(usecase, network)
+    try:
+        traffic_scale = float(usecase_params["expected_traffic"]["emulated_traffic"]["scale"])
+        app_logger.debug(f"traffic_scale: {traffic_scale=}")
+    except KeyError:
+        app_logger.error(f"failed to fetch usecase params. expected_traffic.emulated_traffic.scale is not found.")
+        return jsonify({"error": f"failed to fetch usecase params. expected_traffic.emulated_traffic.scale is not found."}), 500
+
+    app_logger.info(f"target_node: {target_node}, target_interface: {target_interface}, usecase_params: {usecase_params}")
 
     for dest_device, dest_if_stats in destination_stats.items():
-        if target_device and dest_device != target_device:
+        if target_node and dest_device != target_node:
             app_logger.debug(f"device `{dest_device}` is not target. skipped")
             continue
 
@@ -204,7 +225,7 @@ def get_state_stats_diff(network: str, source_snapshot: str, destination_snapsho
                     diff[dest_device][dest_interface][metric_name] = None
                     continue
 
-                diff[dest_device][dest_interface][metric_name]["counter"] = dest_state_value - src_state_value
+                diff[dest_device][dest_interface][metric_name]["counter"] = (dest_state_value - src_state_value) / traffic_scale
 
                 if src_state_value == 0.0:
                     app_logger.info(f"{metric_name} in source_snapshot ({network}/{source_snapshot}) is 0. src/dst ration could not be calculated.")
