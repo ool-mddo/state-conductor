@@ -9,6 +9,7 @@ from promclient import PrometheusClient
 from collections import defaultdict
 from typing import Dict
 import re
+import json
 
 app = Flask(__name__)
 app_logger = create_logger(app)
@@ -17,6 +18,7 @@ logging.basicConfig(level=logging.DEBUG)
 
 DATA_DIR = Path(__file__).parent
 TIMESTAMP_DIR = DATA_DIR.joinpath("timestamp")
+STATE_DIR = DATA_DIR.joinpath("state")
 PROMETHEUS_URL = getenv("PROMETHEUS_URL", "http://prometheus:9090")
 
 
@@ -43,6 +45,34 @@ def _exist_ongoing_sampling(network: str, snapshot: str) -> bool:
 
     return False
 
+def _get_state_stats_filepath(network, snapshot: str) -> Path:
+    return STATE_DIR.joinpath(f"{network}-{snapshot}-stats.json")
+
+def _save_state_stats(network: str, snapshot: str, state_stats: dict) -> None:
+    stats_path = _get_state_stats_filepath(network, snapshot)
+
+    if not stats_path.parent.exists():
+        stats_path.parent.mkdir(exist_ok=True, parents=True)
+
+    if stats_path.exists():
+        app_logger.info(f"{stats_path} already exists. overwriting...")
+
+    with open(stats_path, "w") as f:
+        app_logger.info(f"saving stats to {stats_path}")
+        json.dump(state_stats, f)
+
+def _load_state_stats(network: str, snapshot: str) -> dict|None:
+    stats_path = _get_state_stats_filepath(network, snapshot)
+
+    if not stats_path.exists():
+        app_logger.error(f"{stats_path} does not exist.")
+        return None
+
+    app_logger.info(f"loading state stats from {stats_path}")
+    with open(stats_path, "r") as f:
+        state_stats = json.load(f)
+    
+    return state_stats
 
 def _save_timestamp(network: str, snapshot: str, action: str) -> None:
     path = _get_timestamp_filepath(network, snapshot, action)
@@ -93,14 +123,108 @@ def post_sampling_action(network: str, snapshot: str):
     # move into action
     _save_timestamp(network, snapshot, action)
 
+    if action == "end":
+        app_logger.info("fetching state stats...")
+        # save state stats
+        state_stats = _fetch_sampled_state_stats(network, snapshot)
+        _save_state_stats(network, snapshot, state_stats)
+
     # response
     response["action"] = action
     response["timestamp"] = _get_timestamp(network, snapshot, action)
     return jsonify(response)
 
 
+def _get_original_asis_state(network: str) -> dict:
+    return _load_state_stats(network, "original_asis")
+
 @app.route("/state-conductor/environment/<network>/<snapshot>/state", methods=["GET"])
 def get_sampled_state_stats(network: str, snapshot: str):
+
+    state_stats = _load_state_stats(network, snapshot)
+
+    if not state_stats:
+        return jsonify({"error": f"state stats for {network}/{snapshot} is not found"}), 404
+
+    response = {
+        "network": network,
+        "snapshot": snapshot,
+        "state": state_stats,
+    }
+
+    return jsonify(response)
+
+@app.route("/state-conductor/<network>/snapshot_diff/<source_snapshot>/<destination_snapshot>", methods=["GET"])
+def get_state_stats_diff(network: str, source_snapshot: str, destination_snapshot: str):
+    source_stats = _load_state_stats(network, source_snapshot)
+    destination_stats = _load_state_stats(network, destination_snapshot)
+
+    if not source_stats:
+        return jsonify({"error": f"state stats for source_snapshot ({network}/{source_snapshot}) is not found"}), 404
+
+    if not destination_stats:
+        return jsonify({"error": f"state stats for destination_snapshot({network}/{destination_snapshot}) is not found"}), 404
+
+    diff = dict() 
+
+    target_device = request.args.get("device")
+    target_interface = request.args.get("interface")
+
+    app_logger.info(f"target_device: {target_device}, target_interface: {target_interface}")
+
+    for dest_device, dest_if_stats in destination_stats.items():
+        if target_device and dest_device != target_device:
+            app_logger.debug(f"device `{dest_device}` is not target. skipped")
+            continue
+
+        if dest_device not in source_stats:
+            app_logger.info(f"state stats for device `{dest_device}` is not found in source_snapshot ({network}/{source_snapshot}). skipped")
+            continue
+
+        for dest_interface, dest_stats in dest_if_stats.items():
+            if target_interface and dest_interface != target_interface:
+                app_logger.debug(f"interface `{dest_interface}` is not target. skipped")
+                continue
+
+            if dest_interface not in source_stats[dest_device]:
+                app_logger.info(f"state stats for interface `{dest_interface}` is not found in destination_snapshot ({network}/{destination_snapshot}). skipped")
+                continue
+
+            if dest_device not in diff:
+                diff[dest_device] = dict()
+
+            diff[dest_device][dest_interface] = dict()
+
+            for metric_name, dest_state_value in dest_stats.items():
+                diff[dest_device][dest_interface][metric_name] = dict()
+                src_state_value = source_stats[dest_device][dest_interface].get(metric_name)
+
+                if src_state_value == None:
+                    app_logger.info(f"metric {metric_name} not found in source_snapshot ({network}/{source_snapshot}). skipped")
+                    diff[dest_device][dest_interface][metric_name] = None
+                    continue
+
+                diff[dest_device][dest_interface][metric_name]["counter"] = dest_state_value - src_state_value
+
+                if src_state_value == 0.0:
+                    app_logger.info(f"{metric_name} in source_snapshot ({network}/{source_snapshot}) is 0. src/dst ration could not be calculated.")
+                    diff[dest_device][dest_interface][metric_name]["ratio"] = None
+                else:
+                    diff[dest_device][dest_interface][metric_name]["ratio"] = dest_state_value / src_state_value
+
+    if diff == {}:
+        app_logger.info(f"no snapshot diff generated between {network}/{source_snapshot} and {network}/{destination_snapshot}")
+
+    result = {
+        "network": network,
+        "source_snapshot": source_snapshot,
+        "destination_snapshot": destination_snapshot,
+        "diff": diff,
+    }
+
+    return jsonify(result), 200
+
+def _fetch_sampled_state_stats(network: str, snapshot: str) -> dict:
 
     begin = _get_timestamp(network, snapshot, "begin")
     end = _get_timestamp(network, snapshot, "end")
@@ -148,18 +272,10 @@ def get_sampled_state_stats(network: str, snapshot: str):
             if not device:
                 app_logger.debug(f"device is not found. skipping")
                 continue
-            value = raw_metric["value"][1]  # 1個目がタイムスタンプ、2個目が値
+            value = float(raw_metric["value"][1])  # 1個目がタイムスタンプ、2個目が値
             metrics[device][interface][metric_type] = value
 
-    state_data = {
-        "network": network,
-        "snapshot": snapshot,
-        "state": metrics,
-    }
-
-    # response
-    return jsonify(state_data)
-
+    return metrics
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=5000)
