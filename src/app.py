@@ -7,7 +7,6 @@ from pathlib import Path
 from math import floor
 from promclient import PrometheusClient
 from collections import defaultdict
-from typing import Dict
 import requests
 import re
 import json
@@ -21,8 +20,7 @@ DATA_DIR = Path(__file__).parent
 TIMESTAMP_DIR = DATA_DIR.joinpath("timestamp")
 STATE_DIR = DATA_DIR.joinpath("state")
 PROMETHEUS_URL = getenv("PROMETHEUS_URL", "http://prometheus:9090")
-API_PROXY_URL = "http://api-proxy"
-
+API_PROXY_HOST = "api-proxy"
 
 def _get_timestamp_filepath(network: str, snapshot: str, action: str) -> Path:
     return TIMESTAMP_DIR.joinpath(f"{network}-{snapshot}-{action}.txt")
@@ -92,7 +90,7 @@ def _get_timestamp(network: str, snapshot: str, action: str) -> int:
     return int(floor(float(timestamp)))
 
 
-def _error_message(response: Dict, msg: str) -> Dict:
+def _error_message(response: dict, msg: str) -> dict:
     app_logger.error(msg)
     response["error"] = msg
     return response
@@ -139,7 +137,7 @@ def post_sampling_action(network: str, snapshot: str):
 def _fetch_usecase_params(usecase: str, network: str) -> dict:
 
     try:
-        response = requests.get(f"{API_PROXY_URL}/usecases/{usecase}/{network}/params")
+        response = requests.get(f"http://{API_PROXY_HOST}/usecases/{usecase}/{network}/params")
     except:
         app_logger.error(f"failed to fetch usecase params.")
         raise
@@ -150,6 +148,16 @@ def _fetch_usecase_params(usecase: str, network: str) -> dict:
     app_logger.debug(f"response for usecase: {usecase}, network: {network}: {response.text}")
     
     return response.json()
+
+def _fetch_ns_convert_table(network: str) -> list | dict:
+    try:
+        response = requests.get(f"http://{API_PROXY_HOST}/topologies/{network}/ns_convert_table")
+        response.raise_for_status()
+        app_logger.debug(response.text)
+        return response.json().get('tp_name_table')
+    except:
+        app_logger.error(f"Failed to get ns_convert_table for {network}")
+        raise
 
 @app.route("/state-conductor/environment/<network>/<snapshot>/state", methods=["GET"])
 def get_sampled_state_stats(network: str, snapshot: str):
@@ -180,8 +188,9 @@ def get_state_stats_diff(usecase: str, network: str, source_snapshot: str, desti
 
     diff = dict() 
 
-    target_node = request.args.get("node")
-    target_interface = request.args.get("interface")
+    target_nodes = request.args.get("nodes").split(',') if request.args.get("nodes") else None
+    target_interfaces = request.args.get("interfaces").split(',') if request.args.get("interfaces") else None
+    target_metrics = request.args.get("metrics").split(',') if requests.args.get("metrics") else None
 
     usecase_params = _fetch_usecase_params(usecase, network)
     try:
@@ -191,10 +200,10 @@ def get_state_stats_diff(usecase: str, network: str, source_snapshot: str, desti
         app_logger.error(f"failed to fetch usecase params. expected_traffic.emulated_traffic.scale is not found.")
         return jsonify({"error": f"failed to fetch usecase params. expected_traffic.emulated_traffic.scale is not found."}), 500
 
-    app_logger.info(f"target_node: {target_node}, target_interface: {target_interface}, usecase_params: {usecase_params}")
+    app_logger.info(f"target_nodes: {target_nodes}, target_interfaces: {target_interfaces}, target_metrics: {target_metrics}, usecase_params: {usecase_params}")
 
     for dest_device, dest_if_stats in destination_stats.items():
-        if target_node and dest_device != target_node:
+        if target_nodes and dest_device not in target_nodes:
             app_logger.debug(f"device `{dest_device}` is not target. skipped")
             continue
 
@@ -203,7 +212,7 @@ def get_state_stats_diff(usecase: str, network: str, source_snapshot: str, desti
             continue
 
         for dest_interface, dest_stats in dest_if_stats.items():
-            if target_interface and dest_interface != target_interface:
+            if target_interfaces and dest_interface not in target_interfaces:
                 app_logger.debug(f"interface `{dest_interface}` is not target. skipped")
                 continue
 
@@ -217,6 +226,10 @@ def get_state_stats_diff(usecase: str, network: str, source_snapshot: str, desti
             diff[dest_device][dest_interface] = dict()
 
             for metric_name, dest_state_value in dest_stats.items():
+                if target_metrics and metric_name not in target_metrics:
+                    app_logger.debug(f"metric `{metric_name}` is not target. skipped")
+                    continue 
+
                 diff[dest_device][dest_interface][metric_name] = dict()
                 src_state_value = source_stats[dest_device][dest_interface].get(metric_name)
 
@@ -252,16 +265,16 @@ def _fetch_sampled_state_stats(network: str, snapshot: str) -> dict:
     duration = end - begin
 
     queries = {
-        "RX_BPS_AVG": f'avg_over_time(irate(container_network_receive_bytes_total{{instance="namespace-relabeler:5000",name=~"clab-.*"}}[10s])[{duration}s:])*8',
-        "RX_BPS_MAX": f'max_over_time(irate(container_network_receive_bytes_total{{instance="namespace-relabeler:5000",name=~"clab-.*"}}[10s])[{duration}s:])*8',
-        "RX_BPS_MIN": f'min_over_time(irate(container_network_receive_bytes_total{{instance="namespace-relabeler:5000",name=~"clab-.*"}}[10s])[{duration}s:])*8',
-        "TX_BPS_AVG": f'avg_over_time(irate(container_network_transmit_bytes_total{{instance="namespace-relabeler:5000",name=~"clab-.*"}}[10s])[{duration}s:])*8',
-        "TX_BPS_MAX": f'max_over_time(irate(container_network_transmit_bytes_total{{instance="namespace-relabeler:5000",name=~"clab-.*"}}[10s])[{duration}s:])*8',
-        "TX_BPS_MIN": f'min_over_time(irate(container_network_transmit_bytes_total{{instance="namespace-relabeler:5000",name=~"clab-.*"}}[10s])[{duration}s:])*8',
+        "RX_BPS_AVG": f'avg_over_time(irate(container_network_receive_bytes_total{{instance="cadvisor:8080",name=~"clab-.*"}}[10s])[{duration}s:])*8',
+        "RX_BPS_MAX": f'max_over_time(irate(container_network_receive_bytes_total{{instance="cadvisor:8080",name=~"clab-.*"}}[10s])[{duration}s:])*8',
+        "RX_BPS_MIN": f'min_over_time(irate(container_network_receive_bytes_total{{instance="cadvisor:8080",name=~"clab-.*"}}[10s])[{duration}s:])*8',
+        "TX_BPS_AVG": f'avg_over_time(irate(container_network_transmit_bytes_total{{instance="cadvisor:8080",name=~"clab-.*"}}[10s])[{duration}s:])*8',
+        "TX_BPS_MAX": f'max_over_time(irate(container_network_transmit_bytes_total{{instance="cadvisor:8080",name=~"clab-.*"}}[10s])[{duration}s:])*8',
+        "TX_BPS_MIN": f'min_over_time(irate(container_network_transmit_bytes_total{{instance="cadvisor:8080",name=~"clab-.*"}}[10s])[{duration}s:])*8',
     }
 
     required_keys_map = {
-        "device": "container_label_clab_node_name",
+        "node": "container_label_clab_node_name",
         "interface": "interface",
     }
 
@@ -277,24 +290,34 @@ def _fetch_sampled_state_stats(network: str, snapshot: str) -> dict:
         r"^eth0",
     ]
 
+    ns_convert_table = _fetch_ns_convert_table(network)
     client = PrometheusClient(PROMETHEUS_URL)
     metrics = defaultdict(lambda: defaultdict(dict))
     for metric_type, query in queries.items():
         raw_metrics = client.query_instant_metrics(query, end)
         for raw_metric in raw_metrics:
             interface = raw_metric["metric"].get(required_keys_map["interface"])
+            app_logger.debug(f"raw_metric: {raw_metric}")
+
             if not interface:
-                app_logger.debug(f"interface is not found. skipping")
+                app_logger.debug(f"interface is not found. skipped")
                 continue
             if any(re.match(pattern, interface) for pattern in ignored_ifname_patterns):
-                app_logger.debug(f"{interface} is not needed. skipping")
+                app_logger.debug(f"{interface} is not needed. skipped")
                 continue
-            device = raw_metric["metric"].get(required_keys_map["device"])
-            if not device:
-                app_logger.debug(f"device is not found. skipping")
+
+            node = raw_metric["metric"].get(required_keys_map["node"])
+
+            if not node:
+                app_logger.debug(f"device is not found. skipped")
                 continue
+            
+            # cadvisorは物理インターフェース、ns_convert_tableは論理インターフェースを使っているため、変換が必要
+            # 一旦、末尾に .0 をつけることで対処する
+            # e.g. eth1 => eth1.0
+            interface = ns_convert_table[node][f"{interface}.0"]["l3_model"]
             value = float(raw_metric["value"][1])  # 1個目がタイムスタンプ、2個目が値
-            metrics[device][interface][metric_type] = value
+            metrics[node][interface][metric_type] = value
 
     return metrics
 
