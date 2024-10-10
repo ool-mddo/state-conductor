@@ -188,8 +188,9 @@ def get_state_stats_diff(usecase: str, network: str, source_snapshot: str, desti
 
     diff = dict() 
 
-    target_node = request.args.get("node")
-    target_interface = request.args.get("interface")
+    target_nodes = request.args.get("nodes").split(',') if request.args.get("nodes") else None
+    target_interfaces = request.args.get("interfaces").split(',') if request.args.get("interfaces") else None
+    target_metrics = request.args.get("metrics").split(',') if requests.args.get("metrics") else None
 
     usecase_params = _fetch_usecase_params(usecase, network)
     try:
@@ -199,10 +200,10 @@ def get_state_stats_diff(usecase: str, network: str, source_snapshot: str, desti
         app_logger.error(f"failed to fetch usecase params. expected_traffic.emulated_traffic.scale is not found.")
         return jsonify({"error": f"failed to fetch usecase params. expected_traffic.emulated_traffic.scale is not found."}), 500
 
-    app_logger.info(f"target_node: {target_node}, target_interface: {target_interface}, usecase_params: {usecase_params}")
+    app_logger.info(f"target_nodes: {target_nodes}, target_interfaces: {target_interfaces}, target_metrics: {target_metrics}, usecase_params: {usecase_params}")
 
     for dest_device, dest_if_stats in destination_stats.items():
-        if target_node and dest_device != target_node:
+        if target_nodes and dest_device not in target_nodes:
             app_logger.debug(f"device `{dest_device}` is not target. skipped")
             continue
 
@@ -211,7 +212,7 @@ def get_state_stats_diff(usecase: str, network: str, source_snapshot: str, desti
             continue
 
         for dest_interface, dest_stats in dest_if_stats.items():
-            if target_interface and dest_interface != target_interface:
+            if target_interfaces and dest_interface not in target_interfaces:
                 app_logger.debug(f"interface `{dest_interface}` is not target. skipped")
                 continue
 
@@ -225,6 +226,10 @@ def get_state_stats_diff(usecase: str, network: str, source_snapshot: str, desti
             diff[dest_device][dest_interface] = dict()
 
             for metric_name, dest_state_value in dest_stats.items():
+                if target_metrics and metric_name not in target_metrics:
+                    app_logger.debug(f"metric `{metric_name}` is not target. skipped")
+                    continue 
+
                 diff[dest_device][dest_interface][metric_name] = dict()
                 src_state_value = source_stats[dest_device][dest_interface].get(metric_name)
 
