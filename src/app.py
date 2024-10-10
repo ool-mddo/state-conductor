@@ -21,8 +21,7 @@ DATA_DIR = Path(__file__).parent
 TIMESTAMP_DIR = DATA_DIR.joinpath("timestamp")
 STATE_DIR = DATA_DIR.joinpath("state")
 PROMETHEUS_URL = getenv("PROMETHEUS_URL", "http://prometheus:9090")
-API_PROXY_URL = "http://api-proxy"
-
+API_PROXY_HOST = "api-proxy"
 
 def _get_timestamp_filepath(network: str, snapshot: str, action: str) -> Path:
     return TIMESTAMP_DIR.joinpath(f"{network}-{snapshot}-{action}.txt")
@@ -139,7 +138,7 @@ def post_sampling_action(network: str, snapshot: str):
 def _fetch_usecase_params(usecase: str, network: str) -> dict:
 
     try:
-        response = requests.get(f"{API_PROXY_URL}/usecases/{usecase}/{network}/params")
+        response = requests.get(f"http://{API_PROXY_HOST}/usecases/{usecase}/{network}/params")
     except:
         app_logger.error(f"failed to fetch usecase params.")
         raise
@@ -150,6 +149,16 @@ def _fetch_usecase_params(usecase: str, network: str) -> dict:
     app_logger.debug(f"response for usecase: {usecase}, network: {network}: {response.text}")
     
     return response.json()
+
+def _fetch_ns_convert_table(network: str) -> list | dict:
+    try:
+        response = requests.get(f"http://{API_PROXY_HOST}/topologies/{network}/ns_convert_table")
+        response.raise_for_status()
+        app_logger.debug(response.text)
+        return response.json().get('tp_name_table')
+    except:
+        app_logger.error(f"Failed to get ns_convert_table for {network}")
+        raise
 
 @app.route("/state-conductor/environment/<network>/<snapshot>/state", methods=["GET"])
 def get_sampled_state_stats(network: str, snapshot: str):
