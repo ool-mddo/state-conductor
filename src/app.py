@@ -265,16 +265,16 @@ def _fetch_sampled_state_stats(network: str, snapshot: str) -> dict:
     duration = end - begin
 
     queries = {
-        "RX_BPS_AVG": f'avg_over_time(irate(container_network_receive_bytes_total{{instance="namespace-relabeler:5000",name=~"clab-.*"}}[10s])[{duration}s:])*8',
-        "RX_BPS_MAX": f'max_over_time(irate(container_network_receive_bytes_total{{instance="namespace-relabeler:5000",name=~"clab-.*"}}[10s])[{duration}s:])*8',
-        "RX_BPS_MIN": f'min_over_time(irate(container_network_receive_bytes_total{{instance="namespace-relabeler:5000",name=~"clab-.*"}}[10s])[{duration}s:])*8',
-        "TX_BPS_AVG": f'avg_over_time(irate(container_network_transmit_bytes_total{{instance="namespace-relabeler:5000",name=~"clab-.*"}}[10s])[{duration}s:])*8',
-        "TX_BPS_MAX": f'max_over_time(irate(container_network_transmit_bytes_total{{instance="namespace-relabeler:5000",name=~"clab-.*"}}[10s])[{duration}s:])*8',
-        "TX_BPS_MIN": f'min_over_time(irate(container_network_transmit_bytes_total{{instance="namespace-relabeler:5000",name=~"clab-.*"}}[10s])[{duration}s:])*8',
+        "RX_BPS_AVG": f'avg_over_time(irate(container_network_receive_bytes_total{{instance="cadvisor:8080",name=~"clab-.*"}}[10s])[{duration}s:])*8',
+        "RX_BPS_MAX": f'max_over_time(irate(container_network_receive_bytes_total{{instance="cadvisor:8080",name=~"clab-.*"}}[10s])[{duration}s:])*8',
+        "RX_BPS_MIN": f'min_over_time(irate(container_network_receive_bytes_total{{instance="cadvisor:8080",name=~"clab-.*"}}[10s])[{duration}s:])*8',
+        "TX_BPS_AVG": f'avg_over_time(irate(container_network_transmit_bytes_total{{instance="cadvisor:8080",name=~"clab-.*"}}[10s])[{duration}s:])*8',
+        "TX_BPS_MAX": f'max_over_time(irate(container_network_transmit_bytes_total{{instance="cadvisor:8080",name=~"clab-.*"}}[10s])[{duration}s:])*8',
+        "TX_BPS_MIN": f'min_over_time(irate(container_network_transmit_bytes_total{{instance="cadvisor:8080",name=~"clab-.*"}}[10s])[{duration}s:])*8',
     }
 
     required_keys_map = {
-        "device": "container_label_clab_node_name",
+        "node": "container_label_clab_node_name",
         "interface": "interface",
     }
 
@@ -290,24 +290,34 @@ def _fetch_sampled_state_stats(network: str, snapshot: str) -> dict:
         r"^eth0",
     ]
 
+    ns_convert_table = _fetch_ns_convert_table(network)
     client = PrometheusClient(PROMETHEUS_URL)
     metrics = defaultdict(lambda: defaultdict(dict))
     for metric_type, query in queries.items():
         raw_metrics = client.query_instant_metrics(query, end)
         for raw_metric in raw_metrics:
             interface = raw_metric["metric"].get(required_keys_map["interface"])
+            app_logger.debug(f"raw_metric: {raw_metric}")
+
             if not interface:
-                app_logger.debug(f"interface is not found. skipping")
+                app_logger.debug(f"interface is not found. skipped")
                 continue
             if any(re.match(pattern, interface) for pattern in ignored_ifname_patterns):
-                app_logger.debug(f"{interface} is not needed. skipping")
+                app_logger.debug(f"{interface} is not needed. skipped")
                 continue
-            device = raw_metric["metric"].get(required_keys_map["device"])
-            if not device:
-                app_logger.debug(f"device is not found. skipping")
+
+            node = raw_metric["metric"].get(required_keys_map["node"])
+
+            if not node:
+                app_logger.debug(f"device is not found. skipped")
                 continue
+            
+            # cadvisorは物理インターフェース、ns_convert_tableは論理インターフェースを使っているため、変換が必要
+            # 一旦、末尾に .0 をつけることで対処する
+            # e.g. eth1 => eth1.0
+            interface = ns_convert_table[node][f"{interface}.0"]["l3_model"]
             value = float(raw_metric["value"][1])  # 1個目がタイムスタンプ、2個目が値
-            metrics[device][interface][metric_type] = value
+            metrics[node][interface][metric_type] = value
 
     return metrics
 
