@@ -7,7 +7,6 @@ from pathlib import Path
 from math import floor
 from promclient import PrometheusClient
 from collections import defaultdict
-from typing import Dict
 import requests
 import re
 import json
@@ -91,7 +90,7 @@ def _get_timestamp(network: str, snapshot: str, action: str) -> int:
     return int(floor(float(timestamp)))
 
 
-def _error_message(response: Dict, msg: str) -> Dict:
+def _error_message(response: dict, msg: str) -> dict:
     app_logger.error(msg)
     response["error"] = msg
     return response
