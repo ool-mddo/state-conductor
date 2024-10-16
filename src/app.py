@@ -190,7 +190,7 @@ def get_state_stats_diff(usecase: str, network: str, source_snapshot: str, desti
 
     target_nodes = request.args.get("nodes").split(',') if request.args.get("nodes") else None
     target_interfaces = request.args.get("interfaces").split(',') if request.args.get("interfaces") else None
-    target_metrics = request.args.get("metrics").split(',') if requests.args.get("metrics") else None
+    target_metrics = request.args.get("metrics").split(',') if request.args.get("metrics") else None
 
     usecase_params = _fetch_usecase_params(usecase, network)
     try:
