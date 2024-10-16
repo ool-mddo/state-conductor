@@ -321,5 +321,26 @@ def _fetch_sampled_state_stats(network: str, snapshot: str) -> dict:
 
     return metrics
 
+@app.route("/state-conductor/environment/<network>", methods=["DELETE"])
+@app.route("/state-conductor/environment/<network>/<snapshot>", methods=["DELETE"])
+def cleanup_state_stats(network: str, snapshot: str=None):
+    if snapshot:
+        state_stats_files = STATE_DIR.glob(f"{network}-{snapshot}*.json")
+        timestamp_files = TIMESTAMP_DIR.glob(f"{network}-{snapshot}-*.txt")
+    else:
+        state_stats_files = STATE_DIR.glob(f"{network}-*.json")
+        timestamp_files = TIMESTAMP_DIR.glob(f"{network}-*.txt")
+
+    target_files = list(state_stats_files) + list(timestamp_files)
+
+    for file in target_files:
+        if file.exists():
+            file.unlink()
+            app_logger.info(f"removed {file}")
+        else:
+            app_logger.info(f"{file} does not exist. skipped")
+
+    return jsonify({"network": network, "snapshot": snapshot, "message": "cleanup done"}), 200
+
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=5000)
