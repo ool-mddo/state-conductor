@@ -16,9 +16,9 @@ app_logger = create_logger(app)
 logging.basicConfig(level=logging.DEBUG)
 # logging.basicConfig(level=logging.WARNING)
 
-DATA_DIR = Path(__file__).parent
+DATA_DIR = Path(getenv("MDDO_STATES_DIR", Path(__file__).parent))
 TIMESTAMP_DIR = DATA_DIR.joinpath("timestamp")
-STATE_DIR = DATA_DIR.joinpath("state")
+STATS_DIR = DATA_DIR.joinpath("stats")
 PROMETHEUS_URL = getenv("PROMETHEUS_URL", "http://prometheus:9090")
 API_PROXY_HOST = "api-proxy"
 
@@ -46,7 +46,7 @@ def _exist_ongoing_sampling(network: str, snapshot: str) -> bool:
     return False
 
 def _get_state_stats_filepath(network, snapshot: str) -> Path:
-    return STATE_DIR.joinpath(f"{network}-{snapshot}-stats.json")
+    return STATS_DIR.joinpath(f"{network}-{snapshot}-stats.json")
 
 def _save_state_stats(network: str, snapshot: str, state_stats: dict) -> None:
     stats_path = _get_state_stats_filepath(network, snapshot)
@@ -325,10 +325,10 @@ def _fetch_sampled_state_stats(network: str, snapshot: str) -> dict:
 @app.route("/state-conductor/environment/<network>/<snapshot>", methods=["DELETE"])
 def cleanup_state_stats(network: str, snapshot: str=None):
     if snapshot:
-        state_stats_files = STATE_DIR.glob(f"{network}-{snapshot}*.json")
+        state_stats_files = STATS_DIR.glob(f"{network}-{snapshot}*.json")
         timestamp_files = TIMESTAMP_DIR.glob(f"{network}-{snapshot}-*.txt")
     else:
-        state_stats_files = STATE_DIR.glob(f"{network}-*.json")
+        state_stats_files = STATS_DIR.glob(f"{network}-*.json")
         timestamp_files = TIMESTAMP_DIR.glob(f"{network}-*.txt")
 
     target_files = list(state_stats_files) + list(timestamp_files)
