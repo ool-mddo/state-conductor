@@ -100,7 +100,7 @@ def _error_message(response: dict, msg: str) -> dict:
     "/state-conductor/environment/<network>/<snapshot>/sampling", methods=["POST"]
 )
 def post_sampling_action(network: str, snapshot: str):
-    response = {"network": network, "snapshot": snapshot}
+    response = { "network": network, "snapshot": snapshot}
 
     if not request.is_json:
         response["error"] = "request is not json"
@@ -126,7 +126,9 @@ def post_sampling_action(network: str, snapshot: str):
     if action == "end":
         app_logger.info("fetching state stats...")
         # save state stats
-        state_stats = _fetch_sampled_state_stats(network, snapshot)
+        worker = request.json.get("worker")
+        response["worker"] = worker
+        state_stats = _fetch_sampled_state_stats(worker, network, snapshot)
         _save_state_stats(network, snapshot, state_stats)
 
     # response
@@ -258,19 +260,19 @@ def get_state_stats_diff(usecase: str, network: str, source_snapshot: str, desti
 
     return jsonify(result), 200
 
-def _fetch_sampled_state_stats(network: str, snapshot: str) -> dict:
+def _fetch_sampled_state_stats(worker: str, network: str, snapshot: str) -> dict:
 
     begin = _get_timestamp(network, snapshot, "begin")
     end = _get_timestamp(network, snapshot, "end")
     duration = end - begin
 
     queries = {
-        "RX_BPS_AVG": f'avg_over_time(irate(container_network_receive_bytes_total{{instance="cadvisor:8080",name=~"clab-.*"}}[10s])[{duration}s:])*8',
-        "RX_BPS_MAX": f'max_over_time(irate(container_network_receive_bytes_total{{instance="cadvisor:8080",name=~"clab-.*"}}[10s])[{duration}s:])*8',
-        "RX_BPS_MIN": f'min_over_time(irate(container_network_receive_bytes_total{{instance="cadvisor:8080",name=~"clab-.*"}}[10s])[{duration}s:])*8',
-        "TX_BPS_AVG": f'avg_over_time(irate(container_network_transmit_bytes_total{{instance="cadvisor:8080",name=~"clab-.*"}}[10s])[{duration}s:])*8',
-        "TX_BPS_MAX": f'max_over_time(irate(container_network_transmit_bytes_total{{instance="cadvisor:8080",name=~"clab-.*"}}[10s])[{duration}s:])*8',
-        "TX_BPS_MIN": f'min_over_time(irate(container_network_transmit_bytes_total{{instance="cadvisor:8080",name=~"clab-.*"}}[10s])[{duration}s:])*8',
+        "RX_BPS_AVG": f'avg_over_time(irate(container_network_receive_bytes_total{{instance="{worker}",name=~"clab-.*"}}[10s])[{duration}s:])*8',
+        "RX_BPS_MAX": f'max_over_time(irate(container_network_receive_bytes_total{{instance="{worker}",name=~"clab-.*"}}[10s])[{duration}s:])*8',
+        "RX_BPS_MIN": f'min_over_time(irate(container_network_receive_bytes_total{{instance="{worker}",name=~"clab-.*"}}[10s])[{duration}s:])*8',
+        "TX_BPS_AVG": f'avg_over_time(irate(container_network_transmit_bytes_total{{instance="{worker}",name=~"clab-.*"}}[10s])[{duration}s:])*8',
+        "TX_BPS_MAX": f'max_over_time(irate(container_network_transmit_bytes_total{{instance="{worker}",name=~"clab-.*"}}[10s])[{duration}s:])*8',
+        "TX_BPS_MIN": f'min_over_time(irate(container_network_transmit_bytes_total{{instance="{worker}",name=~"clab-.*"}}[10s])[{duration}s:])*8',
     }
 
     required_keys_map = {
