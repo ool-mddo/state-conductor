@@ -128,7 +128,7 @@ def post_sampling_action(network: str, snapshot: str):
         # save state stats
         worker = request.json.get("worker")
         response["worker"] = worker
-        state_stats = _fetch_sampled_state_stats(worker, network, snapshot)
+        state_stats = _fetch_sampled_state_stats(network, snapshot)
         _save_state_stats(network, snapshot, state_stats)
 
     # response
@@ -176,6 +176,29 @@ def get_sampled_state_stats(network: str, snapshot: str):
     }
 
     return jsonify(response)
+
+def _fetch_worker_name(network: str, snapshot: str, begin: int, end: int) -> str:
+
+    query = f'job_status{{jobname="Iperf Executing",network_name="{network}",snapshot_name="{snapshot}"}}'
+    client = PrometheusClient(PROMETHEUS_URL)
+    data = client.query_range_metrics(
+        query=query,
+        start=begin,
+        end=end,
+    )
+
+    if len(data) != 1:
+        app_logger.warn(f"Could not fetch expected time series. {data=}")
+        return None
+    
+    if "mddo_worker" not in data[0]["metric"]:
+        app_logger.warn(f"Could not find mddo_worker label. {data=}")
+        return None
+
+    worker = data[0]["metric"]["mddo_worker"]
+
+    return worker
+
 
 @app.route("/state-conductor/<usecase>/<network>/snapshot_diff/<source_snapshot>/<destination_snapshot>", methods=["GET"])
 def get_state_stats_diff(usecase: str, network: str, source_snapshot: str, destination_snapshot: str):
@@ -260,19 +283,22 @@ def get_state_stats_diff(usecase: str, network: str, source_snapshot: str, desti
 
     return jsonify(result), 200
 
-def _fetch_sampled_state_stats(worker: str, network: str, snapshot: str) -> dict:
+def _fetch_sampled_state_stats(network: str, snapshot: str) -> dict:
 
     begin = _get_timestamp(network, snapshot, "begin")
     end = _get_timestamp(network, snapshot, "end")
-    duration = end - begin
+
+    worker = _fetch_worker_name(network, snapshot, begin, end)
+
+    duration = end - begin+20 # iperfが流れ切るまでのオフセット
 
     queries = {
-        "RX_BPS_AVG": f'avg_over_time(irate(container_network_receive_bytes_total{{instance="{worker}",name=~"clab-.*"}}[10s])[{duration}s:])*8',
-        "RX_BPS_MAX": f'max_over_time(irate(container_network_receive_bytes_total{{instance="{worker}",name=~"clab-.*"}}[10s])[{duration}s:])*8',
-        "RX_BPS_MIN": f'min_over_time(irate(container_network_receive_bytes_total{{instance="{worker}",name=~"clab-.*"}}[10s])[{duration}s:])*8',
-        "TX_BPS_AVG": f'avg_over_time(irate(container_network_transmit_bytes_total{{instance="{worker}",name=~"clab-.*"}}[10s])[{duration}s:])*8',
-        "TX_BPS_MAX": f'max_over_time(irate(container_network_transmit_bytes_total{{instance="{worker}",name=~"clab-.*"}}[10s])[{duration}s:])*8',
-        "TX_BPS_MIN": f'min_over_time(irate(container_network_transmit_bytes_total{{instance="{worker}",name=~"clab-.*"}}[10s])[{duration}s:])*8',
+        "RX_BPS_AVG": f'avg_over_time(irate(container_network_receive_bytes_total{{mddo_worker="{worker}",name=~"clab-.*"}}[10s])[{duration}s:])*8',
+        "RX_BPS_MAX": f'max_over_time(irate(container_network_receive_bytes_total{{mddo_worker="{worker}",name=~"clab-.*"}}[10s])[{duration}s:])*8',
+        "RX_BPS_MIN": f'min_over_time(irate(container_network_receive_bytes_total{{mddo_worker="{worker}",name=~"clab-.*"}}[10s])[{duration}s:])*8',
+        "TX_BPS_AVG": f'avg_over_time(irate(container_network_transmit_bytes_total{{mddo_worker="{worker}",name=~"clab-.*"}}[10s])[{duration}s:])*8',
+        "TX_BPS_MAX": f'max_over_time(irate(container_network_transmit_bytes_total{{mddo_worker="{worker}",name=~"clab-.*"}}[10s])[{duration}s:])*8',
+        "TX_BPS_MIN": f'min_over_time(irate(container_network_transmit_bytes_total{{mddo_worker="{worker}",name=~"clab-.*"}}[10s])[{duration}s:])*8',
     }
 
     required_keys_map = {
