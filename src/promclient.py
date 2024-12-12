@@ -25,6 +25,8 @@ class PrometheusClient:
             logger.error("Failed to query metrics.")
             raise Exception(f"Error {response.status_code}: {response.text}")
 
+        logger.debug(f"{response=}")
+
         return response.json()["data"]["result"]
 
     def query_range_metrics(self, query: str, start: int, end: int, step: int=10) -> list:
@@ -42,5 +44,7 @@ class PrometheusClient:
         if response.status_code != 200:
             logger.error("Failed to query metrics.")
             raise Exception(f"Error {response.status_code}: {response.text}")
+
+        logger.debug(f"{response=}")
 
         return response.json()["data"]["result"]
