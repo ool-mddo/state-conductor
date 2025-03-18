@@ -2,7 +2,7 @@
 
 # timestamp file dir
 src/timestamp
-src/state
+src/stats
 # python
 
 # Byte-compiled / optimized / DLL files
